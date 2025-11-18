@@ -585,7 +585,7 @@ def run_comprehensive_experiment():
     
     # Algorithm parameters
     num_episodes = 3000
-    discount_factor = 1.0  # Changed from gamma to match function parameter names
+    discount_factor = 1.0
     epsilon_val = 0.1
     learning_rate = 0.1
     

@@ -1,695 +1,717 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from collections import defaultdict
-from typing import Tuple, List, Dict
-import copy
- 
+from typing import Dict, List, Tuple, Set
+import random
+
 # ============================================================================
-# ENVIRONMENT: WINDY GRIDWORLD
+# ENVIRONMENT: GUSTY GRID NAVIGATION
 # ============================================================================
- 
-class WindyGridworld:
+
+class GustyGridNavigation:
     """
-    Stochastic Windy Gridworld Environment
-    - N x N grid with terminal state
-    - Wind pushes agent upward (stochastically)
-    - Reward: -1 for all transitions, 0 for reaching goal
+    Grid Navigation with Gusty Winds Environment
+    - Grid with goal state and variable wind effects
+    - Stochastic wind movements
+    - Penalty for each step, reward for reaching destination
     """
     
-    def __init__(self, height=7, width=10, start=(3, 0), goal=(3, 7),
-                 wind=None, walls=None):
-        self.height = height
-        self.width = width
-        self.start = start
-        self.goal = goal
+    def __init__(self, rows=7, cols=10, initial_pos=(3, 0), target=(3, 7),
+                 gusts=None, obstacles=None):
+        self.rows = rows
+        self.cols = cols
+        self.initial_pos = initial_pos
+        self.target = target
         
-        # Default wind pattern (stronger in middle columns)
-        if wind is None:
-            self.wind = [0, 0, 0, 1, 1, 1, 2, 2, 1, 0]
+        # Wind gust pattern (different representation)
+        if gusts is None:
+            self.gusts = {0:0, 1:0, 2:0, 3:1, 4:1, 5:1, 6:2, 7:2, 8:1, 9:0}
         else:
-            self.wind = wind
+            self.gusts = gusts
             
-        self.walls = walls if walls is not None else set()
+        self.obstacles = obstacles if obstacles is not None else set()
         
-        # Actions: up, down, left, right
-        self.actions = [0, 1, 2, 3]
-        self.action_deltas = {
-            0: (-1, 0),  # up
-            1: (1, 0),   # down
-            2: (0, -1),  # left
-            3: (0, 1)    # right
+        # Movement directions: north, south, west, east
+        self.moves = ['N', 'S', 'W', 'E']
+        self.move_offsets = {
+            'N': (-1, 0),
+            'S': (1, 0),
+            'W': (0, -1),
+            'E': (0, 1)
         }
         
-        self.current_state = self.start
+        self.current_position = self.initial_pos
+    
+    def restart(self):
+        """Reset to starting position"""
+        self.current_position = self.initial_pos
+        return self.current_position
+    
+    def reached_target(self, position):
+        """Check if position is target"""
+        return position == self.target
+    
+    def get_wind_effect(self, column):
+        """
+        Calculate wind effect for column with randomness
+        - 10% probability: extra strong gust
+        - 80% probability: normal gust
+        - 10% probability: calm (no gust)
+        """
+        chance = random.uniform(0, 1)
+        base_gust = self.gusts.get(column, 0)
         
-    def reset(self):
-        """Reset environment to start state"""
-        self.current_state = self.start
-        return self.current_state
-    
-    def is_terminal(self, state):
-        """Check if state is terminal (goal)"""
-        return state == self.goal
-    
-    def get_stochastic_wind(self, col):
-        """
-        Stochastic wind for column:
-        - 10% chance: wind + 1
-        - 80% chance: normal wind
-        - 10% chance: no wind
-        """
-        rand = np.random.random()
-        if rand < 0.1:
-            return self.wind[col] + 1
-        elif rand < 0.9:
-            return self.wind[col]
+        if chance < 0.1:
+            return base_gust + 1
+        elif chance < 0.9:
+            return base_gust
         else:
             return 0
     
-    def step(self, action):
+    def make_move(self, direction):
         """
-        Execute action and return (next_state, reward, done)
+        Execute movement and return (new_position, score, completed)
         """
-        if self.is_terminal(self.current_state):
-            return self.current_state, 0, True
+        if self.reached_target(self.current_position):
+            return self.current_position, 0, True
         
-        r, c = self.current_state
+        row, col = self.current_position
         
-        # Step 1: Apply action
-        dr, dc = self.action_deltas[action]
-        r_tilde, c_tilde = r + dr, c + dc
+        # Apply movement
+        dr, dc = self.move_offsets[direction]
+        new_row, new_col = row + dr, col + dc
         
-        # Step 2: Apply stochastic wind
-        wind_strength = self.get_stochastic_wind(c)
-        r_hat = r_tilde - wind_strength
-        c_hat = c_tilde
+        # Apply wind effect
+        gust_power = self.get_wind_effect(col)
+        wind_affected_row = new_row - gust_power
+        wind_affected_col = new_col
         
-        # Step 3: Clip to bounds
-        r_prime = np.clip(r_hat, 0, self.height - 1)
-        c_prime = np.clip(c_hat, 0, self.width - 1)
+        # Ensure within bounds
+        final_row = max(0, min(wind_affected_row, self.rows - 1))
+        final_col = max(0, min(wind_affected_col, self.cols - 1))
         
-        # Step 4: Check walls
-        if (r_prime, c_prime) in self.walls:
-            r_prime, c_prime = r, c
+        # Check for obstacles
+        if (final_row, final_col) in self.obstacles:
+            final_row, final_col = row, col
         
-        next_state = (r_prime, c_prime)
+        new_position = (final_row, final_col)
         
-        # Reward: 0 if reaching goal, -1 otherwise
-        reward = 0 if next_state == self.goal else -1
-        done = self.is_terminal(next_state)
+        # Calculate reward
+        score = 0 if new_position == self.target else -1
+        completed = self.reached_target(new_position)
         
-        self.current_state = next_state
-        return next_state, reward, done
+        self.current_position = new_position
+        return new_position, score, completed
     
-    def get_all_states(self):
-        """Get all non-terminal states"""
-        states = []
-        for r in range(self.height):
-            for c in range(self.width):
-                if (r, c) != self.goal and (r, c) not in self.walls:
-                    states.append((r, c))
-        return states
- 
- 
+    def get_valid_positions(self):
+        """Get all non-target positions"""
+        positions = []
+        for r in range(self.rows):
+            for c in range(self.cols):
+                if (r, c) != self.target and (r, c) not in self.obstacles:
+                    positions.append((r, c))
+        return positions
+
 # ============================================================================
-# HELPER FUNCTIONS
+# POLICY AND EPISODE FUNCTIONS
 # ============================================================================
- 
-def epsilon_greedy_policy(Q, state, actions, epsilon):
+
+def select_action_eps_greedy(Q_values, position, available_actions, eps):
     """
-    Epsilon-greedy policy
+    Select action using epsilon-greedy strategy
     """
-    if np.random.random() < epsilon:
-        return np.random.choice(actions)
+    if random.random() < eps:
+        return random.choice(available_actions)
     else:
-        q_values = [Q.get((state, a), 0.0) for a in actions]
-        max_q = max(q_values)
-        # Handle ties randomly
-        best_actions = [a for a in actions if Q.get((state, a), 0.0) == max_q]
-        return np.random.choice(best_actions)
- 
-def greedy_policy(Q, state, actions):
+        # Get Q-values for current position
+        action_values = [Q_values.get((position, act), 0.0) for act in available_actions]
+        best_value = max(action_values)
+        # Handle multiple best actions
+        optimal_actions = [act for act in available_actions 
+                          if Q_values.get((position, act), 0.0) == best_value]
+        return random.choice(optimal_actions)
+
+def select_action_greedy(Q_values, position, available_actions):
     """
-    Greedy policy (deterministic)
+    Select action greedily
     """
-    q_values = [Q.get((state, a), 0.0) for a in actions]
-    max_q = max(q_values)
-    best_actions = [a for a in actions if Q.get((state, a), 0.0) == max_q]
-    return np.random.choice(best_actions)
- 
-def generate_episode(env, policy, Q=None, epsilon=0.1):
+    action_values = [Q_values.get((position, act), 0.0) for act in available_actions]
+    best_value = max(action_values)
+    optimal_actions = [act for act in available_actions 
+                      if Q_values.get((position, act), 0.0) == best_value]
+    return random.choice(optimal_actions)
+
+def run_episode(environment, policy_func, Q_dict=None, eps=0.1):
     """
-    Generate an episode following the given policy
-    Returns: list of (state, action, reward) tuples
+    Run one episode following policy
+    Returns: sequence of (position, action, reward)
     """
-    episode = []
-    state = env.reset()
+    trajectory = []
+    current_pos = environment.restart()
     
     while True:
-        if Q is not None:
-            action = policy(Q, state, env.actions, epsilon)
+        if Q_dict is not None:
+            action_taken = policy_func(Q_dict, current_pos, environment.moves, eps)
         else:
-            action = policy(state, env.actions)
+            action_taken = policy_func(current_pos, environment.moves)
         
-        next_state, reward, done = env.step(action)
-        episode.append((state, action, reward))
+        next_pos, reward, done = environment.make_move(action_taken)
+        trajectory.append((current_pos, action_taken, reward))
         
         if done:
             break
-        state = next_state
+        current_pos = next_pos
     
-    return episode
- 
- 
+    return trajectory
+
 # ============================================================================
-# ALGORITHM 1: DYNAMIC PROGRAMMING CONTROL (Value Iteration)
+# ALGORITHM 1: VALUE ITERATION
 # ============================================================================
- 
-def dp_control(env, gamma=1.0, theta=1e-6, max_iterations=1000):
+
+def run_value_iteration(environment, discount=1.0, tolerance=1e-6, max_iters=1000):
     """
-    Dynamic Programming Control using Value Iteration
-    Requires model knowledge (transition probabilities)
+    Dynamic Programming using Value Iteration
+    Requires environment model knowledge
     """
-    print("Running DP Control...")
+    print("Executing Value Iteration...")
     
-    # Initialize value function
-    V = defaultdict(float)
-    policy = {}
+    # Initialize state values
+    V_vals = {}
+    policy_map = {}
     
     # Get all states
-    all_states = env.get_all_states()
-    all_states.append(env.goal)  # Include goal state
+    states_list = environment.get_valid_positions()
+    states_list.append(environment.target)
     
-    for iteration in range(max_iterations):
-        delta = 0
+    for iteration in range(max_iters):
+        max_change = 0
         
-        # Update value for each state
-        for state in all_states:
-            if env.is_terminal(state):
-                V[state] = 0
+        for state in states_list:
+            if environment.reached_target(state):
+                V_vals[state] = 0
                 continue
             
-            # Compute Q-values for all actions
-            q_values = []
-            for action in env.actions:
-                # Since environment is stochastic, we average over wind outcomes
-                q_sa = 0
-                wind_probs = [0.1, 0.8, 0.1]  # [wind+1, normal, no wind]
-                wind_values = [1, 0, -1]  # relative to base wind
+            # Calculate Q-values for each action
+            q_vals_per_action = []
+            for action in environment.moves:
+                q_val = 0
+                # Wind outcome probabilities
+                prob_dist = [0.1, 0.8, 0.1]
+                wind_modifiers = [1, 0, -1]
                 
                 r, c = state
-                dr, dc = env.action_deltas[action]
+                dr, dc = environment.move_offsets[action]
                 
-                for wind_prob, wind_delta in zip(wind_probs, wind_values):
-                    # Calculate next state with this wind outcome
-                    if wind_delta == 1:
-                        wind_strength = env.wind[c] + 1
-                    elif wind_delta == 0:
-                        wind_strength = env.wind[c]
+                for prob, wind_mod in zip(prob_dist, wind_modifiers):
+                    # Determine wind strength
+                    if wind_mod == 1:
+                        gust_strength = environment.gusts[c] + 1
+                    elif wind_mod == 0:
+                        gust_strength = environment.gusts[c]
                     else:
-                        wind_strength = 0
+                        gust_strength = 0
                     
-                    r_next = np.clip(r + dr - wind_strength, 0, env.height - 1)
-                    c_next = np.clip(c + dc, 0, env.width - 1)
+                    # Calculate resulting position
+                    r_result = r + dr - gust_strength
+                    c_result = c + dc
                     
-                    if (r_next, c_next) in env.walls:
-                        r_next, c_next = r, c
+                    # Apply bounds and obstacles
+                    r_final = max(0, min(r_result, environment.rows - 1))
+                    c_final = max(0, min(c_result, environment.cols - 1))
                     
-                    next_state = (r_next, c_next)
-                    reward = 0 if next_state == env.goal else -1
+                    if (r_final, c_final) in environment.obstacles:
+                        r_final, c_final = r, c
                     
-                    q_sa += wind_prob * (reward + gamma * V[next_state])
+                    result_state = (r_final, c_final)
+                    reward_val = 0 if result_state == environment.target else -1
+                    
+                    q_val += prob * (reward_val + discount * V_vals.get(result_state, 0.0))
                 
-                q_values.append(q_sa)
+                q_vals_per_action.append(q_val)
             
-            v_new = max(q_values)
-            delta = max(delta, abs(V[state] - v_new))
-            V[state] = v_new
+            new_v = max(q_vals_per_action)
+            max_change = max(max_change, abs(V_vals.get(state, 0.0) - new_v))
+            V_vals[state] = new_v
         
-        if delta < theta:
-            print(f"  DP converged in {iteration + 1} iterations")
+        if max_change < tolerance:
+            print(f"  Value Iteration completed in {iteration + 1} iterations")
             break
     
-    # Extract policy from value function
-    Q = defaultdict(float)
-    for state in all_states:
-        if env.is_terminal(state):
+    # Extract Q-values from value function
+    Q_dict = {}
+    for state in states_list:
+        if environment.reached_target(state):
             continue
         
-        for action in env.actions:
-            q_sa = 0
-            wind_probs = [0.1, 0.8, 0.1]
-            wind_values = [1, 0, -1]
+        for action in environment.moves:
+            q_val = 0
+            prob_dist = [0.1, 0.8, 0.1]
+            wind_modifiers = [1, 0, -1]
             
             r, c = state
-            dr, dc = env.action_deltas[action]
+            dr, dc = environment.move_offsets[action]
             
-            for wind_prob, wind_delta in zip(wind_probs, wind_values):
-                if wind_delta == 1:
-                    wind_strength = env.wind[c] + 1
-                elif wind_delta == 0:
-                    wind_strength = env.wind[c]
+            for prob, wind_mod in zip(prob_dist, wind_modifiers):
+                if wind_mod == 1:
+                    gust_strength = environment.gusts[c] + 1
+                elif wind_mod == 0:
+                    gust_strength = environment.gusts[c]
                 else:
-                    wind_strength = 0
+                    gust_strength = 0
                 
-                r_next = np.clip(r + dr - wind_strength, 0, env.height - 1)
-                c_next = np.clip(c + dc, 0, env.width - 1)
+                r_result = r + dr - gust_strength
+                c_result = c + dc
                 
-                if (r_next, c_next) in env.walls:
-                    r_next, c_next = r, c
+                r_final = max(0, min(r_result, environment.rows - 1))
+                c_final = max(0, min(c_result, environment.cols - 1))
                 
-                next_state = (r_next, c_next)
-                reward = 0 if next_state == env.goal else -1
+                if (r_final, c_final) in environment.obstacles:
+                    r_final, c_final = r, c
                 
-                q_sa += wind_prob * (reward + gamma * V[next_state])
+                result_state = (r_final, c_final)
+                reward_val = 0 if result_state == environment.target else -1
+                
+                q_val += prob * (reward_val + discount * V_vals.get(result_state, 0.0))
             
-            Q[(state, action)] = q_sa
+            Q_dict[(state, action)] = q_val
     
-    return Q, V
- 
- 
+    return Q_dict, V_vals
+
 # ============================================================================
-# ALGORITHM 2: MONTE CARLO ON-POLICY CONTROL
+# ALGORITHM 2: MONTE CARLO ON-POLICY
 # ============================================================================
- 
-def mc_on_policy_control(env, num_episodes=5000, gamma=1.0, epsilon=0.1, alpha=0.1):
+
+def monte_carlo_on_policy(environment, episodes=5000, discount=1.0, eps=0.1, step_size=0.1):
     """
-    Monte Carlo On-Policy Control (epsilon-greedy)
+    Monte Carlo On-Policy Control with epsilon-greedy policy
     """
-    print("Running MC On-Policy Control...")
+    print("Running Monte Carlo On-Policy...")
     
-    Q = defaultdict(float)
-    returns_count = defaultdict(int)
-    episode_lengths = []
+    Q_dict = {}
+    visit_counts = {}
+    episode_steps = []
     
-    for episode_num in range(num_episodes):
-        # Generate episode using epsilon-greedy policy
-        episode = generate_episode(env, epsilon_greedy_policy, Q, epsilon)
-        episode_lengths.append(len(episode))
+    for episode_idx in range(episodes):
+        # Generate episode
+        episode_data = run_episode(environment, select_action_eps_greedy, Q_dict, eps)
+        episode_steps.append(len(episode_data))
         
-        # Track states-actions visited in this episode
-        visited = set()
+        # Track visited state-action pairs
+        visited_pairs = set()
         
-        # Calculate returns and update Q (first-visit)
-        G = 0
-        for t in range(len(episode) - 1, -1, -1):
-            state, action, reward = episode[t]
-            G = gamma * G + reward
+        # Calculate returns and update Q-values
+        cumulative_return = 0
+        for step in reversed(range(len(episode_data))):
+            state, action, reward = episode_data[step]
+            cumulative_return = discount * cumulative_return + reward
             
-            if (state, action) not in visited:
-                visited.add((state, action))
-                # Incremental update
-                returns_count[(state, action)] += 1
-                Q[(state, action)] += alpha * (G - Q[(state, action)])
+            if (state, action) not in visited_pairs:
+                visited_pairs.add((state, action))
+                # Update visit count and Q-value
+                visit_counts[(state, action)] = visit_counts.get((state, action), 0) + 1
+                current_q = Q_dict.get((state, action), 0.0)
+                Q_dict[(state, action)] = current_q + step_size * (cumulative_return - current_q)
         
-        if (episode_num + 1) % 500 == 0:
-            avg_length = np.mean(episode_lengths[-500:])
-            print(f"  Episode {episode_num + 1}/{num_episodes}, Avg Length: {avg_length:.2f}")
+        if (episode_idx + 1) % 500 == 0:
+            avg_steps = np.mean(episode_steps[-500:])
+            print(f"  Episode {episode_idx + 1}/{episodes}, Average Steps: {avg_steps:.2f}")
     
-    return Q, episode_lengths
- 
- 
+    return Q_dict, episode_steps
+
 # ============================================================================
-# ALGORITHM 3: MONTE CARLO OFF-POLICY CONTROL
+# ALGORITHM 3: MONTE CARLO OFF-POLICY
 # ============================================================================
- 
-def mc_off_policy_control(env, num_episodes=5000, gamma=1.0, epsilon=0.1, alpha=0.1):
+
+def monte_carlo_off_policy(environment, episodes=5000, discount=1.0, eps=0.1, step_size=0.1):
     """
     Monte Carlo Off-Policy Control with Importance Sampling
-    Behavior policy: epsilon-greedy
-    Target policy: greedy
     """
-    print("Running MC Off-Policy Control...")
+    print("Running Monte Carlo Off-Policy...")
     
-    Q = defaultdict(float)
-    C = defaultdict(float)  # Cumulative sum of weights
-    episode_lengths = []
+    Q_dict = {}
+    weight_sums = {}
+    episode_steps = []
     
-    for episode_num in range(num_episodes):
-        # Generate episode using behavior policy (epsilon-greedy)
-        episode = generate_episode(env, epsilon_greedy_policy, Q, epsilon)
-        episode_lengths.append(len(episode))
+    for episode_idx in range(episodes):
+        # Generate episode with behavior policy
+        episode_data = run_episode(environment, select_action_eps_greedy, Q_dict, eps)
+        episode_steps.append(len(episode_data))
         
-        G = 0
-        W = 1.0  # Importance sampling ratio
+        cumulative_return = 0
+        importance_ratio = 1.0
         
-        # Update in reverse
-        for t in range(len(episode) - 1, -1, -1):
-            state, action, reward = episode[t]
-            G = gamma * G + reward
+        # Process episode backwards
+        for step in reversed(range(len(episode_data))):
+            state, action, reward = episode_data[step]
+            cumulative_return = discount * cumulative_return + reward
             
-            C[(state, action)] += W
-            Q[(state, action)] += (W / C[(state, action)]) * (G - Q[(state, action)])
+            # Update Q-value with importance sampling
+            weight_sums[(state, action)] = weight_sums.get((state, action), 0.0) + importance_ratio
+            current_q = Q_dict.get((state, action), 0.0)
+            Q_dict[(state, action)] = current_q + (importance_ratio / weight_sums[(state, action)]) * (cumulative_return - current_q)
             
-            # Target policy is greedy
-            greedy_action = greedy_policy(Q, state, env.actions)
-            if action != greedy_action:
-                break  # Importance sampling ratio becomes 0
+            # Check if action matches target policy
+            target_action = select_action_greedy(Q_dict, state, environment.moves)
+            if action != target_action:
+                break  # Stop if behavior diverges from target
             
             # Update importance sampling ratio
-            # P(target) / P(behavior)
-            # Target policy: greedy (probability 1 for greedy action)
-            # Behavior policy: epsilon-greedy
-            prob_behavior = epsilon / len(env.actions) + (1 - epsilon) if action == greedy_action else epsilon / len(env.actions)
-            prob_target = 1.0
-            W *= prob_target / prob_behavior
+            # Target policy probability
+            target_prob = 1.0
+            # Behavior policy probability
+            if action == target_action:
+                behavior_prob = eps / len(environment.moves) + (1 - eps)
+            else:
+                behavior_prob = eps / len(environment.moves)
+            
+            importance_ratio *= target_prob / behavior_prob
         
-        if (episode_num + 1) % 500 == 0:
-            avg_length = np.mean(episode_lengths[-500:])
-            print(f"  Episode {episode_num + 1}/{num_episodes}, Avg Length: {avg_length:.2f}")
+        if (episode_idx + 1) % 500 == 0:
+            avg_steps = np.mean(episode_steps[-500:])
+            print(f"  Episode {episode_idx + 1}/{episodes}, Average Steps: {avg_steps:.2f}")
     
-    return Q, episode_lengths
- 
- 
+    return Q_dict, episode_steps
+
 # ============================================================================
-# ALGORITHM 4: TD(0) ON-POLICY CONTROL (SARSA)
+# ALGORITHM 4: SARSA (ON-POLICY TD)
 # ============================================================================
- 
-def td_on_policy_control(env, num_episodes=5000, gamma=1.0, epsilon=0.1, alpha=0.1):
+
+def sarsa_learning(environment, episodes=5000, discount=1.0, eps=0.1, step_size=0.1):
     """
-    TD(0) On-Policy Control (SARSA)
+    SARSA: On-Policy TD Control
     """
-    print("Running TD(0) On-Policy Control (SARSA)...")
+    print("Running SARSA Learning...")
     
-    Q = defaultdict(float)
-    episode_lengths = []
+    Q_dict = {}
+    episode_steps = []
     
-    for episode_num in range(num_episodes):
-        state = env.reset()
-        action = epsilon_greedy_policy(Q, state, env.actions, epsilon)
+    for episode_idx in range(episodes):
+        current_state = environment.restart()
+        current_action = select_action_eps_greedy(Q_dict, current_state, environment.moves, eps)
         
         steps = 0
         while True:
-            next_state, reward, done = env.step(action)
+            next_state, reward, done = environment.make_move(current_action)
+            steps += 1
+            
+            if done:
+                # Update Q-value for terminal transition
+                Q_dict[(current_state, current_action)] = Q_dict.get((current_state, current_action), 0.0) + \
+                    step_size * (reward - Q_dict.get((current_state, current_action), 0.0))
+                break
+            
+            # Choose next action
+            next_action = select_action_eps_greedy(Q_dict, next_state, environment.moves, eps)
+            
+            # SARSA update
+            td_target = reward + discount * Q_dict.get((next_state, next_action), 0.0)
+            td_error = td_target - Q_dict.get((current_state, current_action), 0.0)
+            Q_dict[(current_state, current_action)] = Q_dict.get((current_state, current_action), 0.0) + step_size * td_error
+            
+            current_state = next_state
+            current_action = next_action
+        
+        episode_steps.append(steps)
+        
+        if (episode_idx + 1) % 500 == 0:
+            avg_steps = np.mean(episode_steps[-500:])
+            print(f"  Episode {episode_idx + 1}/{episodes}, Average Steps: {avg_steps:.2f}")
+    
+    return Q_dict, episode_steps
+
+# ============================================================================
+# ALGORITHM 5: Q-LEARNING (OFF-POLICY TD)
+# ============================================================================
+
+def q_learning(environment, episodes=5000, discount=1.0, eps=0.1, step_size=0.1):
+    """
+    Q-Learning: Off-Policy TD Control
+    """
+    print("Running Q-Learning...")
+    
+    Q_dict = {}
+    episode_steps = []
+    
+    for episode_idx in range(episodes):
+        current_state = environment.restart()
+        
+        steps = 0
+        while True:
+            # Behavior policy: epsilon-greedy
+            current_action = select_action_eps_greedy(Q_dict, current_state, environment.moves, eps)
+            next_state, reward, done = environment.make_move(current_action)
             steps += 1
             
             if done:
                 # Update for terminal state
-                Q[(state, action)] += alpha * (reward - Q[(state, action)])
+                Q_dict[(current_state, current_action)] = Q_dict.get((current_state, current_action), 0.0) + \
+                    step_size * (reward - Q_dict.get((current_state, current_action), 0.0))
                 break
             
-            # Choose next action
-            next_action = epsilon_greedy_policy(Q, next_state, env.actions, epsilon)
-            
-            # SARSA update
-            td_target = reward + gamma * Q[(next_state, next_action)]
-            Q[(state, action)] += alpha * (td_target - Q[(state, action)])
-            
-            state = next_state
-            action = next_action
-        
-        episode_lengths.append(steps)
-        
-        if (episode_num + 1) % 500 == 0:
-            avg_length = np.mean(episode_lengths[-500:])
-            print(f"  Episode {episode_num + 1}/{num_episodes}, Avg Length: {avg_length:.2f}")
-    
-    return Q, episode_lengths
- 
- 
-# ============================================================================
-# ALGORITHM 5: TD(0) OFF-POLICY CONTROL (Q-Learning, Unweighted IS)
-# ============================================================================
- 
-def td_off_policy_unweighted(env, num_episodes=5000, gamma=1.0, epsilon=0.1, alpha=0.1):
-    """
-    TD(0) Off-Policy Control with Unweighted Importance Sampling
-    This is essentially Q-Learning
-    """
-    print("Running TD(0) Off-Policy Control (Unweighted IS / Q-Learning)...")
-    
-    Q = defaultdict(float)
-    episode_lengths = []
-    
-    for episode_num in range(num_episodes):
-        state = env.reset()
-        
-        steps = 0
-        while True:
-            # Behavior policy: epsilon-greedy
-            action = epsilon_greedy_policy(Q, state, env.actions, epsilon)
-            next_state, reward, done = env.step(action)
-            steps += 1
-            
-            if done:
-                Q[(state, action)] += alpha * (reward - Q[(state, action)])
-                break
-            
-            # Target policy: greedy (max over next actions)
-            max_q_next = max([Q.get((next_state, a), 0.0) for a in env.actions])
+            # Target policy: greedy (max Q)
+            max_next_q = max([Q_dict.get((next_state, act), 0.0) for act in environment.moves])
             
             # Q-Learning update
-            td_target = reward + gamma * max_q_next
-            Q[(state, action)] += alpha * (td_target - Q[(state, action)])
+            td_target = reward + discount * max_next_q
+            td_error = td_target - Q_dict.get((current_state, current_action), 0.0)
+            Q_dict[(current_state, current_action)] = Q_dict.get((current_state, current_action), 0.0) + step_size * td_error
             
-            state = next_state
+            current_state = next_state
         
-        episode_lengths.append(steps)
+        episode_steps.append(steps)
         
-        if (episode_num + 1) % 500 == 0:
-            avg_length = np.mean(episode_lengths[-500:])
-            print(f"  Episode {episode_num + 1}/{num_episodes}, Avg Length: {avg_length:.2f}")
+        if (episode_idx + 1) % 500 == 0:
+            avg_steps = np.mean(episode_steps[-500:])
+            print(f"  Episode {episode_idx + 1}/{episodes}, Average Steps: {avg_steps:.2f}")
     
-    return Q, episode_lengths
- 
- 
+    return Q_dict, episode_steps
+
 # ============================================================================
-# ALGORITHM 6: TD(0) OFF-POLICY CONTROL (Weighted IS)
+# ALGORITHM 6: WEIGHTED IS TD LEARNING
 # ============================================================================
- 
-def td_off_policy_weighted(env, num_episodes=5000, gamma=1.0, epsilon=0.1, alpha=0.1):
+
+def weighted_is_td_learning(environment, episodes=5000, discount=1.0, eps=0.1, step_size=0.1):
     """
-    TD(0) Off-Policy Control with Weighted Importance Sampling
+    TD Learning with Weighted Importance Sampling
     """
-    print("Running TD(0) Off-Policy Control (Weighted IS)...")
+    print("Running Weighted IS TD Learning...")
     
-    Q = defaultdict(float)
-    C = defaultdict(float)  # Cumulative weights
-    episode_lengths = []
+    Q_dict = {}
+    cumulative_weights = {}
+    episode_steps = []
     
-    for episode_num in range(num_episodes):
-        state = env.reset()
+    for episode_idx in range(episodes):
+        current_state = environment.restart()
         
         steps = 0
         while True:
-            # Behavior policy: epsilon-greedy
-            action = epsilon_greedy_policy(Q, state, env.actions, epsilon)
-            next_state, reward, done = env.step(action)
+            # Behavior policy
+            current_action = select_action_eps_greedy(Q_dict, current_state, environment.moves, eps)
+            next_state, reward, done = environment.make_move(current_action)
             steps += 1
             
             # Calculate importance sampling ratio
-            greedy_action = greedy_policy(Q, state, env.actions)
-            if action == greedy_action:
-                prob_behavior = epsilon / len(env.actions) + (1 - epsilon)
+            greedy_act = select_action_greedy(Q_dict, current_state, environment.moves)
+            if current_action == greedy_act:
+                behavior_prob = eps / len(environment.moves) + (1 - eps)
             else:
-                prob_behavior = epsilon / len(env.actions)
+                behavior_prob = eps / len(environment.moves)
             
-            prob_target = 1.0 if action == greedy_action else 0.0
+            target_prob = 1.0 if current_action == greedy_act else 0.0
             
-            if prob_target == 0:
-                # Can't learn from this transition
+            if target_prob == 0:
+                # Skip update if action not in target policy
                 if done:
                     break
-                state = next_state
+                current_state = next_state
                 continue
             
-            rho = prob_target / prob_behavior
+            is_ratio = target_prob / behavior_prob
             
             if done:
-                C[(state, action)] += rho
-                Q[(state, action)] += (rho / C[(state, action)]) * (reward - Q[(state, action)])
+                cumulative_weights[(current_state, current_action)] = cumulative_weights.get((current_state, current_action), 0.0) + is_ratio
+                old_q = Q_dict.get((current_state, current_action), 0.0)
+                Q_dict[(current_state, current_action)] = old_q + \
+                    (is_ratio / cumulative_weights[(current_state, current_action)]) * (reward - old_q)
                 break
             
-            # Target policy: greedy
-            max_q_next = max([Q.get((next_state, a), 0.0) for a in env.actions])
+            # Target policy is greedy
+            max_next_q = max([Q_dict.get((next_state, act), 0.0) for act in environment.moves])
             
-            # Weighted IS update
-            td_target = reward + gamma * max_q_next
-            C[(state, action)] += rho
-            Q[(state, action)] += (rho / C[(state, action)]) * (td_target - Q[(state, action)])
+            # Weighted update
+            td_target = reward + discount * max_next_q
+            cumulative_weights[(current_state, current_action)] = cumulative_weights.get((current_state, current_action), 0.0) + is_ratio
+            old_q = Q_dict.get((current_state, current_action), 0.0)
+            Q_dict[(current_state, current_action)] = old_q + \
+                (is_ratio / cumulative_weights[(current_state, current_action)]) * (td_target - old_q)
             
-            state = next_state
+            current_state = next_state
         
-        episode_lengths.append(steps)
+        episode_steps.append(steps)
         
-        if (episode_num + 1) % 500 == 0:
-            avg_length = np.mean(episode_lengths[-500:])
-            print(f"  Episode {episode_num + 1}/{num_episodes}, Avg Length: {avg_length:.2f}")
+        if (episode_idx + 1) % 500 == 0:
+            avg_steps = np.mean(episode_steps[-500:])
+            print(f"  Episode {episode_idx + 1}/{episodes}, Average Steps: {avg_steps:.2f}")
     
-    return Q, episode_lengths
- 
- 
+    return Q_dict, episode_steps
+
 # ============================================================================
-# VISUALIZATION AND COMPARISON
+# VISUALIZATION AND ANALYSIS
 # ============================================================================
- 
-def plot_results(results_dict, title="Algorithm Comparison"):
+
+def plot_learning_curves(results_data, title="Algorithm Performance Comparison"):
     """
-    Plot learning curves for all algorithms
+    Plot learning curves for comparison
     """
     plt.figure(figsize=(12, 6))
     
-    for name, episode_lengths in results_dict.items():
-        # Smooth the curve with moving average
+    for algorithm_name, step_counts in results_data.items():
+        # Apply smoothing
         window = 100
-        smoothed = np.convolve(episode_lengths, np.ones(window)/window, mode='valid')
-        plt.plot(smoothed, label=name, linewidth=2)
+        if len(step_counts) >= window:
+            smoothed = np.convolve(step_counts, np.ones(window)/window, mode='valid')
+            plt.plot(smoothed, label=algorithm_name, linewidth=2)
+        else:
+            plt.plot(step_counts, label=algorithm_name, linewidth=2)
     
-    plt.xlabel('Episode', fontsize=12)
+    plt.xlabel('Episode Number', fontsize=12)
     plt.ylabel('Steps per Episode', fontsize=12)
     plt.title(title, fontsize=14)
     plt.legend(fontsize=10)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
- 
-def visualize_policy(env, Q):
+
+def display_policy(environment, Q_dict):
     """
-    Visualize the learned policy as arrows on the grid
+    Display the learned policy visually
     """
-    action_symbols = {0: '↑', 1: '↓', 2: '←', 3: '→'}
+    action_symbols = {'N': '↑', 'S': '↓', 'W': '←', 'E': '→'}
     
-    grid = [['' for _ in range(env.width)] for _ in range(env.height)]
+    policy_grid = [['' for _ in range(environment.cols)] for _ in range(environment.rows)]
     
-    for r in range(env.height):
-        for c in range(env.width):
-            state = (r, c)
-            if state == env.goal:
-                grid[r][c] = 'G'
-            elif state == env.start:
-                q_values = [Q.get((state, a), 0.0) for a in env.actions]
-                best_action = env.actions[np.argmax(q_values)]
-                grid[r][c] = 'S' + action_symbols[best_action]
+    for r in range(environment.rows):
+        for c in range(environment.cols):
+            pos = (r, c)
+            if pos == environment.target:
+                policy_grid[r][c] = 'G'
+            elif pos == environment.initial_pos:
+                action_vals = [Q_dict.get((pos, act), 0.0) for act in environment.moves]
+                best_act = environment.moves[np.argmax(action_vals)]
+                policy_grid[r][c] = 'S' + action_symbols[best_act]
             else:
-                q_values = [Q.get((state, a), 0.0) for a in env.actions]
-                best_action = env.actions[np.argmax(q_values)]
-                grid[r][c] = action_symbols[best_action]
+                action_vals = [Q_dict.get((pos, act), 0.0) for act in environment.moves]
+                best_act = environment.moves[np.argmax(action_vals)]
+                policy_grid[r][c] = action_symbols[best_act]
     
-    print("\nLearned Policy (arrows show best action):")
+    print("\nLearned Policy Visualization:")
     print("S = Start, G = Goal")
-    for r in range(env.height):
-        print(' '.join(f'{grid[r][c]:>2}' for c in range(env.width)))
+    for row in policy_grid:
+        print(' '.join(f'{cell:>2}' for cell in row))
     print()
- 
- 
+
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
- 
-def main():
+
+def execute_comparison():
     """
-    Main function to run all algorithms and compare results
+    Main function to run all algorithms and compare performance
     """
     print("="*70)
-    print("WINDY GRIDWORLD - REINFORCEMENT LEARNING ASSIGNMENT")
+    print("GUSTY GRID NAVIGATION - RL ALGORITHMS COMPARISON")
     print("="*70)
     
-    # Create environment
-    env = WindyGridworld(
-        height=7,
-        width=10,
-        start=(3, 0),
-        goal=(3, 7),
-        wind=[0, 0, 0, 1, 1, 1, 2, 2, 1, 0]
+    # Initialize environment
+    grid_env = GustyGridNavigation(
+        rows=7,
+        cols=10,
+        initial_pos=(3, 0),
+        target=(3, 7),
+        gusts={0:0, 1:0, 2:0, 3:1, 4:1, 5:1, 6:2, 7:2, 8:1, 9:0}
     )
     
-    print(f"\nEnvironment Setup:")
-    print(f"  Grid Size: {env.height} x {env.width}")
-    print(f"  Start: {env.start}")
-    print(f"  Goal: {env.goal}")
-    print(f"  Wind Pattern: {env.wind}")
+    print(f"\nEnvironment Configuration:")
+    print(f"  Grid Dimensions: {grid_env.rows} x {grid_env.cols}")
+    print(f"  Start Position: {grid_env.initial_pos}")
+    print(f"  Target Position: {grid_env.target}")
+    print(f"  Gust Pattern: {[grid_env.gusts[i] for i in range(grid_env.cols)]}")
     print()
     
-    # Hyperparameters
-    num_episodes = 3000
-    gamma = 1.0
-    epsilon = 0.1
-    alpha = 0.1
+    # Algorithm parameters
+    total_episodes = 3000
+    discount_factor = 1.0
+    exploration_rate = 0.1
+    learning_rate = 0.1
     
-    results = {}
-    learned_Q = {}
+    results_data = {}
+    Q_results = {}
     
-    # Run all algorithms
+    # Execute all algorithms
     print("\n" + "="*70)
-    print("RUNNING ALL ALGORITHMS")
+    print("EXECUTING REINFORCEMENT LEARNING ALGORITHMS")
     print("="*70 + "\n")
     
-    # 1. DP Control
-    Q_dp, V_dp = dp_control(env, gamma=gamma)
-    learned_Q['DP'] = Q_dp
+    # 1. Value Iteration
+    Q_vi, V_vi = run_value_iteration(grid_env, discount=discount_factor)
+    Q_results['Value Iteration'] = Q_vi
     print()
     
-    # 2. MC On-Policy
-    Q_mc_on, lengths_mc_on = mc_on_policy_control(
-        env, num_episodes=num_episodes, gamma=gamma, epsilon=epsilon, alpha=alpha
+    # 2. Monte Carlo On-Policy
+    Q_mc_on, steps_mc_on = monte_carlo_on_policy(
+        grid_env, episodes=total_episodes, discount=discount_factor, 
+        eps=exploration_rate, step_size=learning_rate
     )
-    results['MC On-Policy'] = lengths_mc_on
-    learned_Q['MC On-Policy'] = Q_mc_on
+    results_data['Monte Carlo On-Policy'] = steps_mc_on
+    Q_results['Monte Carlo On-Policy'] = Q_mc_on
     print()
     
-    # 3. MC Off-Policy
-    Q_mc_off, lengths_mc_off = mc_off_policy_control(
-        env, num_episodes=num_episodes, gamma=gamma, epsilon=epsilon, alpha=alpha
+    # 3. Monte Carlo Off-Policy
+    Q_mc_off, steps_mc_off = monte_carlo_off_policy(
+        grid_env, episodes=total_episodes, discount=discount_factor,
+        eps=exploration_rate, step_size=learning_rate
     )
-    results['MC Off-Policy'] = lengths_mc_off
-    learned_Q['MC Off-Policy'] = Q_mc_off
+    results_data['Monte Carlo Off-Policy'] = steps_mc_off
+    Q_results['Monte Carlo Off-Policy'] = Q_mc_off
     print()
     
-    # 4. TD On-Policy (SARSA)
-    Q_td_on, lengths_td_on = td_on_policy_control(
-        env, num_episodes=num_episodes, gamma=gamma, epsilon=epsilon, alpha=alpha
+    # 4. SARSA
+    Q_sarsa, steps_sarsa = sarsa_learning(
+        grid_env, episodes=total_episodes, discount=discount_factor,
+        eps=exploration_rate, step_size=learning_rate
     )
-    results['TD(0) On-Policy (SARSA)'] = lengths_td_on
-    learned_Q['TD(0) On-Policy'] = Q_td_on
+    results_data['SARSA'] = steps_sarsa
+    Q_results['SARSA'] = Q_sarsa
     print()
     
-    # 5. TD Off-Policy Unweighted (Q-Learning)
-    Q_td_off_unw, lengths_td_off_unw = td_off_policy_unweighted(
-        env, num_episodes=num_episodes, gamma=gamma, epsilon=epsilon, alpha=alpha
+    # 5. Q-Learning
+    Q_ql, steps_ql = q_learning(
+        grid_env, episodes=total_episodes, discount=discount_factor,
+        eps=exploration_rate, step_size=learning_rate
     )
-    results['TD(0) Off-Policy (Unweighted)'] = lengths_td_off_unw
-    learned_Q['TD(0) Off-Policy Unweighted'] = Q_td_off_unw
+    results_data['Q-Learning'] = steps_ql
+    Q_results['Q-Learning'] = Q_ql
     print()
     
-    # 6. TD Off-Policy Weighted
-    Q_td_off_w, lengths_td_off_w = td_off_policy_weighted(
-        env, num_episodes=num_episodes, gamma=gamma, epsilon=epsilon, alpha=alpha
+    # 6. Weighted IS TD
+    Q_wis, steps_wis = weighted_is_td_learning(
+        grid_env, episodes=total_episodes, discount=discount_factor,
+        eps=exploration_rate, step_size=learning_rate
     )
-    results['TD(0) Off-Policy (Weighted)'] = lengths_td_off_w
-    learned_Q['TD(0) Off-Policy Weighted'] = Q_td_off_w
+    results_data['Weighted IS TD'] = steps_wis
+    Q_results['Weighted IS TD'] = Q_wis
     print()
     
-    # Plot comparison
+    # Generate comparison plot
     print("="*70)
-    print("RESULTS")
+    print("PERFORMANCE COMPARISON RESULTS")
     print("="*70)
-    plot_results(results, "Windy Gridworld: Algorithm Comparison")
+    plot_learning_curves(results_data, "Gusty Grid Navigation: Algorithm Performance")
     
-    # Visualize one of the learned policies
+    # Show sample policy
     print("\n" + "="*70)
-    print("SAMPLE LEARNED POLICY (TD(0) On-Policy)")
+    print("SAMPLE LEARNED POLICY (SARSA)")
     print("="*70)
-    visualize_policy(env, Q_td_on)
+    display_policy(grid_env, Q_sarsa)
     
-    # Print final statistics
+    # Final performance summary
     print("="*70)
-    print("FINAL PERFORMANCE (Last 100 Episodes Average)")
+    print("FINAL PERFORMANCE SUMMARY (Last 100 Episodes)")
     print("="*70)
-    for name, lengths in results.items():
-        avg_last_100 = np.mean(lengths[-100:])
-        print(f"  {name:35s}: {avg_last_100:6.2f} steps")
+    for algo_name, step_data in results_data.items():
+        final_performance = np.mean(step_data[-100:])
+        print(f"  {algo_name:30s}: {final_performance:6.2f} steps")
     print()
     
     print("="*70)
-    print("ASSIGNMENT COMPLETE!")
+    print("COMPARISON COMPLETE!")
     print("="*70)
     
-    return results, learned_Q
- 
- 
+    return results_data, Q_results
+
 if __name__ == "__main__":
     # Set random seed for reproducibility
+    random.seed(42)
     np.random.seed(42)
     
-    # Run main experiment
-    results, learned_Q = main()
+    # Run the comparison
+    results, Q_values = execute_comparison()

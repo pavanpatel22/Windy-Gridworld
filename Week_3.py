@@ -585,9 +585,9 @@ def run_comprehensive_experiment():
     
     # Algorithm parameters
     num_episodes = 3000
-    gamma = 1.0
-    epsilon = 0.1
-    alpha = 0.1
+    discount_factor = 1.0  # Changed from gamma to match function parameter names
+    epsilon_val = 0.1
+    learning_rate = 0.1
     
     results_storage = {}
     Q_functions = {}
@@ -597,15 +597,15 @@ def run_comprehensive_experiment():
     print("EXECUTING CONTROL ALGORITHMS")
     print("=" * 70 + "\n")
     
-    # 1. Dynamic Programming Control
-    Q_dp, V_dp = dynamic_programming_control(grid_env, gamma=gamma)
+    # 1. Dynamic Programming Control - FIXED: using correct parameter name
+    Q_dp, V_dp = dynamic_programming_control(grid_env, discount_factor=discount_factor)
     Q_functions['DP Control'] = Q_dp
     print()
     
     # 2. Monte Carlo On-Policy Control
     Q_mc_on, steps_mc_on = monte_carlo_on_policy(
-        grid_env, total_episodes=num_episodes, discount_factor=gamma, 
-        epsilon_val=epsilon, learning_rate=alpha
+        grid_env, total_episodes=num_episodes, discount_factor=discount_factor, 
+        epsilon_val=epsilon_val, learning_rate=learning_rate
     )
     results_storage['MC On-Policy'] = steps_mc_on
     Q_functions['MC On-Policy'] = Q_mc_on
@@ -613,8 +613,8 @@ def run_comprehensive_experiment():
     
     # 3. Monte Carlo Off-Policy Control (Unweighted)
     Q_mc_off_unw, steps_mc_off_unw = monte_carlo_off_policy_unweighted(
-        grid_env, total_episodes=num_episodes, discount_factor=gamma,
-        epsilon_val=epsilon, learning_rate=alpha
+        grid_env, total_episodes=num_episodes, discount_factor=discount_factor,
+        epsilon_val=epsilon_val, learning_rate=learning_rate
     )
     results_storage['MC Off-Policy (Unweighted)'] = steps_mc_off_unw
     Q_functions['MC Off-Policy (Unweighted)'] = Q_mc_off_unw
@@ -622,8 +622,8 @@ def run_comprehensive_experiment():
     
     # 4. Monte Carlo Off-Policy Control (Weighted)
     Q_mc_off_w, steps_mc_off_w = monte_carlo_off_policy_weighted(
-        grid_env, total_episodes=num_episodes, discount_factor=gamma,
-        epsilon_val=epsilon, learning_rate=alpha
+        grid_env, total_episodes=num_episodes, discount_factor=discount_factor,
+        epsilon_val=epsilon_val, learning_rate=learning_rate
     )
     results_storage['MC Off-Policy (Weighted)'] = steps_mc_off_w
     Q_functions['MC Off-Policy (Weighted)'] = Q_mc_off_w
@@ -631,8 +631,8 @@ def run_comprehensive_experiment():
     
     # 5. TD(0) On-Policy Control (SARSA)
     Q_td_on, steps_td_on = td_sarsa_control(
-        grid_env, total_episodes=num_episodes, discount_factor=gamma,
-        epsilon_val=epsilon, learning_rate=alpha
+        grid_env, total_episodes=num_episodes, discount_factor=discount_factor,
+        epsilon_val=epsilon_val, learning_rate=learning_rate
     )
     results_storage['TD(0) On-Policy (SARSA)'] = steps_td_on
     Q_functions['TD(0) On-Policy'] = Q_td_on
@@ -640,8 +640,8 @@ def run_comprehensive_experiment():
     
     # 6. TD(0) Off-Policy Control (Q-Learning)
     Q_td_off, steps_td_off = td_q_learning_control(
-        grid_env, total_episodes=num_episodes, discount_factor=gamma,
-        epsilon_val=epsilon, learning_rate=alpha
+        grid_env, total_episodes=num_episodes, discount_factor=discount_factor,
+        epsilon_val=epsilon_val, learning_rate=learning_rate
     )
     results_storage['TD(0) Off-Policy (Q-Learning)'] = steps_td_off
     Q_functions['TD(0) Off-Policy'] = Q_td_off
